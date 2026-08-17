@@ -1,4 +1,4 @@
-## FasterLIO
+## FasterLIO (ROS 2 port)
 
 This is the code repository of FasterLIO by Chunge Bai, Tao Xiang, Yajie Chen, Haoqian Wang, Fang Zhang and Xiang Gao.
 
@@ -6,6 +6,10 @@ Faster-LIO is a light-weight Lidar-inertial odometry for lidar pose tracking and
 the base of [FastLIO2](https://github.com/hku-mars/FAST_LIO) and provides about 1.5-2x speed increase. It achieves
 almost 1k-2k hz for solid-state lidars and over 100 hz for a typical 32 lines spinning lidar. Please refer to [our paper](./doc/faster-lio.pdf)
 for more details.
+
+**This fork is a ROS 2 (Humble) port.** The estimator itself is untouched; everything that talked to ROS 1 was
+rewritten. See [Changes in this fork](#changes-in-this-fork) for the full list. If you are looking for the original
+catkin/ROS 1 version, use [upstream](https://github.com/gaoxiang12/faster-lio).
 
 Below is the FPS tested with avia and velodyne 32 spinning lidar from FastLIO2 and [NCLT](http://robots.engin.umich.edu/nclt/), where "AMD" is tested with  AMD R7 5800X and "Intel" tested with Intel Xeon Gold 5218.
 
@@ -17,99 +21,50 @@ Below is the FPS tested with avia and velodyne 32 spinning lidar from FastLIO2 a
 <img src="https://github.com/gaoxiang12/faster-lio/blob/main/doc/faster-lio-nclt.png" width = "1080" align=center />
 </div>
 
-# Quick Start
-## Docker 
-```bash
-git clone 
-cd faster-lio/docker
-docker-compose build
-docker-compose up
-```  
-Before entering `docker-compose up` command, you should enter `xhost +local:docker` in the local terminal to enable docker to communicate with Xserver on the host.  
-
-update `bag` file path in `.env`, then run.
-```bash
-catkin_make
-source devel/setup.bash
-roslaunch faster_lio mapping_avia.launch
-```
-Open another terminal, then play `bag` file.
-
-### issue
-`QStandardPaths: XDG_RUNTIME_DIR not set, defaulting to '/tmp/runtime-root'` 
-
-**Don't worry, it can run normally**. you can run `source /etc/profile&& source /opt/ros/noetic/setup.bash && source devel/setup.bash`, then `run roslaunch xxx`
-
-
 ## Dependency
 
-FasterLIO is tested in Ubuntu 18.04 and Ubuntu 20.04. Please install the following libraries before compilation.
+Tested on Ubuntu 22.04 with ROS 2 Humble.
 
-1. ROS (melodic or noetic)
+1. ROS 2 (humble), plus `ros-humble-pcl-conversions`, `ros-humble-tf2-ros`, `ros-humble-rosbag2-cpp`
+   (and `ros-humble-rosbag2-storage-mcap` if your bags are MCAP)
 2. glog: ```sudo apt-get install libgoogle-glog-dev```
-3. eigen: ```sudo apt-get install libeigen3-dev```
-4. pcl: ```sudo apt-get install libpcl-dev```
-5. yaml-cpp: ```sudo apt-get install libyaml-cpp-dev```
+3. gflags: ```sudo apt-get install libgflags-dev```
+4. eigen: ```sudo apt-get install libeigen3-dev```
+5. pcl: ```sudo apt-get install libpcl-dev```
+6. tbb: ```sudo apt-get install libtbb-dev```
+7. yaml-cpp: ```sudo apt-get install libyaml-cpp-dev```
 
 ## Compile
 
-FasterLIO can be compiled by plain cmake or catkin_make. In Ubuntu 20.04, the compile step is relatively simple.
-
-1. Plain cmake 
-
-Use the following commands to build FasterLIO:
-
-```bin/bash
-mkdir build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j4
-```
-
-Note: iVox type should be specified by cmake at compile time. By default we will use linear iVox.
-Use ```cmake .. -DWITH_IVOX_NODE_TYPE_PHC=ON``` to build the FasterLIO with PHC iVox.
-
-2. catkin_make
-
-Clone this repository to your catkin workspace, e.g., ~/catkin_ws/src, then use catkin_make instead of the above cmake
-commands. You can also specify the iVox type in catkin_make parameters.
-
-After the compilation, you will get the a libfaster_lio.so and two executable files. If you choose plain cmake build,
-they will be located in ./build/devel/lib/faster_lio. If you use catkin_make, you could run them with rosrun and
-roslaunch.
-
-3. Compile in Ubuntu 18.04 or earlier
-
-Since FasterLIO use cpp 17 as its standard (which requires a higher version of g++), you should upgrade the compiler and
-use the earlier tbb library provided in the thirdparty of this repo. Please follow the steps here:
-
-- Upgrade the g++ compiler to 9.0 or higher by:
+The package is `ament_cmake` and builds with colcon. The bundled Livox message definitions
+(`thirdparty/livox_ros_driver`) are a separate ROS 2 interface package, and **colcon does not descend into a package
+directory**, so it has to be moved next to `faster_lio` in the workspace rather than left nested inside it:
 
 ```bash
-sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo apt update
-sudo apt install gcc-9
-cd /usr/bin
-sudo rm gcc g++
-sudo ln -s gcc-9 gcc
-sudo ln -s g++-9 g++
+mkdir -p ~/ros2_ws/src
+cp -r faster-lio ~/ros2_ws/src/faster_lio
+mv ~/ros2_ws/src/faster_lio/thirdparty/livox_ros_driver ~/ros2_ws/src/livox_ros_driver
+rm -rf ~/ros2_ws/src/faster_lio/thirdparty
+
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-up-to faster_lio --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
 ```
 
-- unzip the tbb library in the thirdparty:
+`laser_mapping.cc` instantiates deep Eigen/ikfom template chains and is memory-hungry to compile; on small machines (or
+under qemu for cross-arch images) pass `--parallel-workers 1`.
 
-```bash
-cd thirdparty
-tar -xvf tbb2018_20170726oss_lin.tgz
-```
+Build options:
 
-- specify the tbb directory in the cmake stage:
+- `-DWITH_IVOX_NODE_TYPE_PHC=ON` — build with PHC iVox instead of the default linear iVox. The iVox type is fixed at
+  compile time.
+- `-DFASTER_LIO_DEBUG_SYMBOLS=ON` — re-enable `-g -ggdb` in Release builds. Upstream had this on unconditionally, which
+  makes the templates in `laser_mapping.cc` emit ~150 MB of debug info and pushes link time into the tens of minutes.
+  It is off by default here; turn it on only when you actually need to debug the estimator.
 
-```bash
-cd ../build
-cmake .. -DCUSTOM_TBB_DIR=`pwd`/../thirdparty/tbb2018_20170726oss
-```
-
-Then just build FasterLIO with make.
+After the build you get `libfaster_lio.so` in `install/faster_lio/lib` and two executables in
+`install/faster_lio/lib/faster_lio`, runnable with `ros2 run`.
 
 ## Prepare the datasets
 
@@ -122,25 +77,31 @@ The link of the dataset is outdated.  Please use the NCLT bags in SAD datasets:
 BaiduYun: https://pan.baidu.com/s/1ELOcF1UTKdfiKBAaXnE8sQ?pwd=feky access code: feky
 OneDrive：https://1drv.ms/u/s!AgNFVSzSYXMahcEZejoUwCaHRcactQ?e=YsOYy2
 
+These are ROS 1 bags — convert them to rosbag2 (e.g. with `rosbags-convert`) before use.
+
 ## Run FasterLIO
 
-FasterLIO can be called like a plain binary program. It can run in offline mode or online mode like any ros program.
+The two entry points keep their upstream split, but they are configured differently: **offline reads a plain YAML file
+directly, online reads ROS 2 parameters.**
 
-- Offline mode
+### Offline mode
 
-Call run_mapping_offline with parameters to specify the bag file and the config file like:
+`run_mapping_offline` opens a rosbag2 with `rosbag2_cpp::Reader` and replays it through the estimator as fast as it can.
+It reads the flat YAML files in `config/` via yaml-cpp (unchanged from upstream), *not* a ROS 2 params file. `--bag_file`
+is a rosbag2 **directory** (the one containing `metadata.yaml`):
 
 ```bash
-./build/devel/lib/faster_lio/run_mapping_offline --bag_file your_avia_bag_file --config_file ./config/avia.yaml
+ros2 run faster_lio run_mapping_offline --bag_file /path/to/your_avia_bag --config_file ./config/avia.yaml
 ```
 
 for avia. For NCLT, just run:
 
 ```bash
-./build/devel/lib/faster_lio/run_mapping_offline --bag_file your_nclt_bag_file --config_file ./config/velodyne.yaml
+ros2 run faster_lio run_mapping_offline --bag_file /path/to/your_nclt_bag --config_file ./config/velodyne.yaml
 ```
 
-Please replace "your avia bag file" with the path in your computer. FasterLIO will print the FPS and time usage when it
+Messages are dispatched by topic *type* (`livox_ros_driver/msg/CustomMsg`, `sensor_msgs/msg/PointCloud2`,
+`sensor_msgs/msg/Imu`), so the topic names in the bag do not matter. FasterLIO will print the FPS and time usage when it
 quits:
 
 ```shell
@@ -159,14 +120,108 @@ I0216 17:16:05.286808 26492 utils.h:54] > [ Undistort Pcl ] average time usage: 
 I0216 17:16:05.286816 26492 utils.h:59] >>> ===== Printing run time end =====
 ```
 
-Point clouds will be saved to PCD/scans.pcd by default. 
+Point clouds will be saved to PCD/scans.pcd by default. Note that these output paths are relative to `ROOT_DIR`, which
+CMake bakes in as the source directory at build time — keep `Log/` and `PCD/` around, or pass absolute paths.
 
-- Online mode 
- 
-Online mode could be launched through rosrun/roslaunch/directly call. We use roslaunch as an example:
+### Online mode
 
-1. Launch faster-lio: ```roslaunch faster_lio mapping_avia.launch``` This will give you a rviz window.
-2. Play the bags using ```rosbag play your bag file``` to see the online outputs.
+`run_mapping_online` is a normal ROS 2 node (node name `laser_mapping`). Parameters come from the node's parameter
+interface, so pass them with `--ros-args --params-file`; gflags flags are still accepted and must come *before*
+`--ros-args`:
+
+```bash
+ros2 run faster_lio run_mapping_online \
+  -traj_log_file=/tmp/traj.txt \
+  --ros-args --params-file /path/to/your_params.yaml
+```
+
+Then play a rosbag2 in another terminal with `ros2 bag play`.
+
+No ROS 2 params files are shipped here — the `config/*.yaml` files are the offline format and cannot be passed to
+`--params-file`. A params file mirrors their layout, but nested keys become dot-separated parameter names
+(`common: {lid_topic: ...}` → `common.lid_topic`) and the whole thing must be wrapped in the ROS 2 preamble:
+
+```yaml
+/**:
+  ros__parameters:
+    common:
+      lid_topic: /livox/lidar
+      imu_topic: /livox/imu
+      time_sync_en: false
+    preprocess:
+      lidar_type: 1
+      scan_line: 6
+      blind: 4.0
+      time_scale: 1.0e-3
+    # ...
+```
+
+Two things to watch when converting a `config/*.yaml` by hand:
+
+- **Types are strict.** ROS 2 has no float parameter type, so everything upstream declared as `float` is declared as a
+  `double` here (`esti_plane_threshold`, `mapping.det_range`, `preprocess.time_scale`, `ivox_grid_resolution`). Write
+  `det_range: 50.0`, not `50` — an int where a double is declared is a hard failure at startup.
+- **Topics are absolute, outputs are relative.** `common.lid_topic` / `common.imu_topic` are used verbatim, while the
+  publishers use relative names and therefore land under the node's namespace.
+
+Published topics (relative — upstream published these as absolute `/cloud_registered`, `/Odometry`, `/path`, …):
+
+| topic | type |
+| --- | --- |
+| `cloud_registered` | `sensor_msgs/msg/PointCloud2` |
+| `cloud_registered_body` | `sensor_msgs/msg/PointCloud2` |
+| `cloud_registered_effect_world` | `sensor_msgs/msg/PointCloud2` |
+| `odometry` (was `/Odometry`) | `nav_msgs/msg/Odometry` |
+| `path` | `nav_msgs/msg/Path` |
+
+Subscriptions use `rclcpp::SensorDataQoS()` (best effort, keep-last 200 for lidar / 2000 for IMU), which is compatible
+with both reliable and best-effort publishers.
+
+The node also broadcasts `tf_world_frame_` → `tf_imu_frame_` on `/tf`. Set the new `publish.tf_en: false` parameter when
+something else in your system already owns that edge.
+
+## Changes in this fork
+
+Build system:
+
+- catkin → `ament_cmake`; `cmake/packages.cmake`, `src/CMakeLists.txt` and `app/CMakeLists.txt` folded into one
+  top-level `CMakeLists.txt`. Plain-cmake (non-ROS) builds are no longer supported.
+- `thirdparty/livox_ros_driver` converted to a `rosidl_generate_interfaces` message-only package (`std_msgs/Header` in
+  `CustomMsg.msg`, `member_of_group` rosidl_interface_packages). Must be built as a sibling package, see
+  [Compile](#compile).
+- `-g -ggdb` removed from the default Release flags, behind the `FASTER_LIO_DEBUG_SYMBOLS` option.
+- Installs the library, both executables (into `lib/faster_lio`) and `config/`.
+
+ROS 1 → ROS 2 API:
+
+- `LaserMapping` now derives from `rclcpp::Node`; `InitROS(ros::NodeHandle&)` → `InitROS()`, and the publisher arguments
+  dropped off the `Publish*` methods since they use the members.
+- Parameters read via `declare_parameter` instead of `nh.param`, with `/` replaced by `.` in every name. New parameter:
+  `publish.tf_en`.
+- `ros::Subscriber`/`ros::Publisher` → typed `rclcpp::Subscription`/`rclcpp::Publisher`. The lidar subscription is split
+  into `sub_pcl_livox_` / `sub_pcl_std_` because the two are now distinct types.
+- `tf::TransformBroadcaster` (a function-local static) → an owned `tf2_ros::TransformBroadcaster` member.
+- `msg/Pose6D.msg` deleted — it was only ever used internally, so it is a plain `struct faster_lio::Pose6D` now.
+- `ros::Time::toSec()` / `ros::Time().fromSec()` → `common::ToSec()` / `common::FromSec()` helpers on
+  `builtin_interfaces::msg::Time`.
+- `boost::array` → `std::array`; dropped the `eigen_conversions` and `unsupported/Eigen/ArpackSupport` includes.
+- `ROS_WARN` → `LOG(WARNING)`, `ROS_ASSERT` → `assert`.
+- Offline replay moved from `rosbag::View` to `rosbag2_cpp::Reader` with explicit `rclcpp::Serialization`
+  deserialization per message type.
+- Both executables call `rclcpp::init_and_remove_ros_arguments()` first and hand the *remaining* argv to gflags.
+  Parsing raw argv with gflags instead makes it consume or reject `--ros-args`, and the node silently comes up with
+  default parameters.
+
+Fixes made along the way:
+
+- `imu_processing.hpp` and `use-ikfom.hpp` define free functions and out-of-class methods in headers; they are `inline`
+  now, which is what the multi-TU ament build requires.
+- `SyncPackages()` takes `mtx_buffer_` — it reads the buffers the subscription callbacks write.
+- `HesaiHandler` returns early on an empty cloud; the loops below it index `points[0]` and `points[plsize - 1]`.
+- `PublishOdometry` fills the covariance before publishing, not after.
+
+Not ported: `launch/*.launch` and `docker/` are the upstream ROS 1 / noetic files. They are left in the tree for
+reference but are neither installed nor usable as-is.
 
 # Acknowledgements
 
