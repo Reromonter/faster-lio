@@ -11,12 +11,12 @@ void PointCloudPreprocess::Set(LidarType lid_type, double bld, int pfilt_num) {
     point_filter_num_ = pfilt_num;
 }
 
-void PointCloudPreprocess::Process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudType::Ptr &pcl_out) {
+void PointCloudPreprocess::Process(const livox_ros_driver::msg::CustomMsg::ConstSharedPtr &msg, PointCloudType::Ptr &pcl_out) {
     AviaHandler(msg);
     *pcl_out = cloud_out_;
 }
 
-void PointCloudPreprocess::Process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointCloudType::Ptr &pcl_out) {
+void PointCloudPreprocess::Process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudType::Ptr &pcl_out) {
     switch (lidar_type_) {
         case LidarType::OUST64:
             Oust64Handler(msg);
@@ -42,7 +42,7 @@ void PointCloudPreprocess::Process(const sensor_msgs::PointCloud2::ConstPtr &msg
     *pcl_out = cloud_out_;
 }
 
-void PointCloudPreprocess::AviaHandler(const livox_ros_driver::CustomMsg::ConstPtr &msg) {
+void PointCloudPreprocess::AviaHandler(const livox_ros_driver::msg::CustomMsg::ConstSharedPtr &msg) {
     cloud_out_.clear();
     cloud_full_.clear();
     int plsize = msg->point_num;
@@ -87,7 +87,7 @@ void PointCloudPreprocess::AviaHandler(const livox_ros_driver::CustomMsg::ConstP
     }
 }
 
-void PointCloudPreprocess::Oust64Handler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
+void PointCloudPreprocess::Oust64Handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
     cloud_out_.clear();
     cloud_full_.clear();
     pcl::PointCloud<ouster_ros::Point> pl_orig;
@@ -118,7 +118,7 @@ void PointCloudPreprocess::Oust64Handler(const sensor_msgs::PointCloud2::ConstPt
     }
 }
 
-void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
+void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
     cloud_out_.clear();
     cloud_full_.clear();
 
@@ -196,13 +196,16 @@ void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::PointCloud2::Const
     }
 }
 
-void PointCloudPreprocess::HesaiHandler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
+void PointCloudPreprocess::HesaiHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
     cloud_out_.clear();
     cloud_full_.clear();
 
     pcl::PointCloud<hesai_ros::Point> pl_orig;
     pcl::fromROSMsg(*msg, pl_orig);
     int plsize = pl_orig.points.size();
+    if (plsize == 0) {
+        return;  // the loops below index points[0] / points[plsize - 1]
+    }
     cloud_out_.reserve(plsize);
 
     /*** These variables only works when no point timestamps given ***/
@@ -276,7 +279,7 @@ void PointCloudPreprocess::HesaiHandler(const sensor_msgs::PointCloud2::ConstPtr
     }
 }
 
-void PointCloudPreprocess::LivoxHandler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
+void PointCloudPreprocess::LivoxHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
     cloud_out_.clear();
     cloud_full_.clear();
 

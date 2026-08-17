@@ -1,23 +1,19 @@
 #ifndef COMMON_LIB_H
 #define COMMON_LIB_H
 
+#include <array>
 #include <deque>
-#include <vector>
 #include <string>
+#include <vector>
 
-#include <eigen_conversions/eigen_msg.h>
-#include <nav_msgs/Odometry.h>
-#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/msg/imu.hpp>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
-#include <boost/array.hpp>
-#include <unsupported/Eigen/ArpackSupport>
 
-#include "faster_lio/Pose6D.h"
 #include "options.h"
 #include "so3_math.h"
 
@@ -26,9 +22,37 @@ using PointCloudType = pcl::PointCloud<PointType>;
 using CloudPtr = PointCloudType::Ptr;
 using PointVector = std::vector<PointType, Eigen::aligned_allocator<PointType>>;
 
+namespace faster_lio {
+
+/// the preintegrated Lidar states at the time of IMU measurements in a frame
+/// (was a ROS1 message; only used internally, so it is a plain struct in the ROS2 port)
+struct Pose6D {
+    double offset_time = 0;      // the offset time of IMU measurement w.r.t the first lidar point
+    std::array<double, 3> acc;   // the preintegrated total acceleration (global frame) at the Lidar origin
+    std::array<double, 3> gyr;   // the unbiased angular velocity (body frame) at the Lidar origin
+    std::array<double, 3> vel;   // the preintegrated velocity (global frame) at the Lidar origin
+    std::array<double, 3> pos;   // the preintegrated position (global frame) at the Lidar origin
+    std::array<double, 9> rot;   // the preintegrated rotation (global frame) at the Lidar origin
+};
+
+}  // namespace faster_lio
+
 namespace faster_lio::common {
 
 constexpr double G_m_s2 = 9.81;  // Gravity const in GuangDong/China
+
+/// stamp -> seconds (replaces ROS1 header.stamp.toSec())
+inline double ToSec(const builtin_interfaces::msg::Time &t) {
+    return static_cast<double>(t.sec) + static_cast<double>(t.nanosec) * 1e-9;
+}
+
+/// seconds -> stamp (replaces ROS1 ros::Time().fromSec())
+inline builtin_interfaces::msg::Time FromSec(double sec) {
+    builtin_interfaces::msg::Time t;
+    t.sec = static_cast<int32_t>(sec);
+    t.nanosec = static_cast<uint32_t>((sec - t.sec) * 1e9);
+    return t;
+}
 
 template <typename S>
 inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::vector<double> &v) {
@@ -36,7 +60,7 @@ inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::vector<double> &v) {
 }
 
 template <typename S>
-inline Eigen::Matrix<S, 3, 1> VecFromArray(const boost::array<S, 3> &v) {
+inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::array<S, 3> &v) {
     return Eigen::Matrix<S, 3, 1>(v[0], v[1], v[2]);
 }
 
@@ -48,7 +72,7 @@ inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::vector<double> &v) {
 }
 
 template <typename S>
-inline Eigen::Matrix<S, 3, 3> MatFromArray(const boost::array<S, 9> &v) {
+inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::array<S, 9> &v) {
     Eigen::Matrix<S, 3, 3> m;
     m << v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8];
     return m;
@@ -87,7 +111,7 @@ struct MeasureGroup {
     double lidar_bag_time_ = 0;
     double lidar_end_time_ = 0;
     PointCloudType::Ptr lidar_ = nullptr;
-    std::deque<sensor_msgs::Imu::ConstPtr> imu_;
+    std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_;
 };
 
 template <typename T>
