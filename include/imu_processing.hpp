@@ -143,7 +143,10 @@ inline void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf
         N++;
     }
     state_ikfom init_state = kf_state.get_x();
-    init_state.grav = S2(-mean_acc_ / mean_acc_.norm() * common::G_m_s2);
+    // Gravity-align the world frame rather than adopting the raw initial IMU frame.
+    init_state.rot = SO3(Eigen::Quaterniond::FromTwoVectors(
+        mean_acc_.normalized(), common::V3D(0.0, 0.0, 1.0)));
+    init_state.grav = S2(common::V3D(0.0, 0.0, -common::G_m_s2));
 
     init_state.bg = mean_gyr_;
     init_state.offset_T_L_I = Lidar_T_wrt_IMU_;
