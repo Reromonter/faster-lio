@@ -1,6 +1,7 @@
 #ifndef FASTER_LIO_LASER_MAPPING_H
 #define FASTER_LIO_LASER_MAPPING_H
 
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <livox_ros_driver/msg/custom_msg.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -59,6 +60,7 @@ class LaserMapping : public rclcpp::Node {
     ////////////////////////////// debug save / show ////////////////////////////////////////////////////////////////
     void PublishPath();
     void PublishOdometry();
+    void PublishScanInformation();
     void PublishFrameWorld();
     void PublishFrameBody();
     void PublishFrameEffectWorld();
@@ -121,6 +123,7 @@ class LaserMapping : public rclcpp::Node {
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_laser_cloud_body_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_laser_cloud_effect_world_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_aft_mapped_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_scan_information_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     bool publish_tf_ = true;
@@ -160,6 +163,9 @@ class LaserMapping : public rclcpp::Node {
     vect3 pos_lidar_;                                  // lidar position after eskf update
     common::V3D euler_cur_ = common::V3D::Zero();      // rotation in euler angles
     bool extrinsic_est_en_ = true;
+    // H^T H / LASER_POINT_COV of the last IEKF iteration over (pos in world, rot in body): what the scan
+    // alone constrains, without the IMU prior. Small eigenvalues = degenerate directions.
+    Eigen::Matrix<double, 6, 6> scan_information_ = Eigen::Matrix<double, 6, 6>::Zero();
 
     /////////////////////////  debug show / save /////////////////////////////////////////////////////////
     bool run_in_offline_ = false;
