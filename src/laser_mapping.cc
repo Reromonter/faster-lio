@@ -282,6 +282,7 @@ void LaserMapping::SubAndPubToROS() {
     pub_laser_cloud_body_ = create_publisher<sensor_msgs::msg::PointCloud2>("cloud_registered_body", 100);
     pub_laser_cloud_effect_world_ = create_publisher<sensor_msgs::msg::PointCloud2>("cloud_registered_effect_world", 100);
     pub_odom_aft_mapped_ = create_publisher<nav_msgs::msg::Odometry>("odometry", 100);
+    pub_scan_information_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("scan_information", 100);
     pub_path_ = create_publisher<nav_msgs::msg::Path>("path", 100);
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -368,6 +369,9 @@ void LaserMapping::Run() {
     } else {
         if (pub_odom_aft_mapped_) {
             PublishOdometry();
+        }
+        if (pub_scan_information_) {
+            PublishScanInformation();
         }
         if (path_pub_en_ || path_save_en_) {
             PublishPath();
@@ -655,6 +659,7 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
 
     if (effect_feat_num_ < 1) {
         ekfom_data.valid = false;
+        scan_information_.setZero();
         LOG(WARNING) << "No Effective Points!";
         return;
     }
@@ -695,6 +700,10 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                 /*** Measurement: distance to the closest surface/corner ***/
                 ekfom_data.h(i) = -corr_pts_[i][3];
             });
+
+            // overwritten every iteration, so after the update it holds the linearization the covariance used
+            const auto H_pose = ekfom_data.h_x.leftCols<6>();
+            scan_information_ = H_pose.transpose() * H_pose / options::LASER_POINT_COV;
         },
         "    ObsModel (IEKF Build Jacobian)");
 }
@@ -741,6 +750,23 @@ void LaserMapping::PublishOdometry() {
         transform.transform.rotation = odom_aft_mapped_.pose.pose.orientation;
         tf_broadcaster_->sendTransform(transform);
     }
+}
+
+void LaserMapping::PublishScanInformation() {
+    // `covariance` carries the scan's information matrix, not a covariance: 1/m^2, 1/rad^2, in ROS
+    // (x y z rx ry rz) order with the rotation block turned into world axes, so rz is yaw. Unlike the
+    // odometry covariance it has no IMU prior in it. The pose is the estimate it was evaluated at.
+    geometry_msgs::msg::PoseWithCovarianceStamped msg;
+    msg.header.stamp = common::FromSec(lidar_end_time_);
+    msg.header.frame_id = tf_world_frame_;
+    SetPosestamp(msg.pose);
+
+    // the IEKF perturbs rotation in the body frame: d_theta_body = R^T d_theta_world
+    Eigen::Matrix<double, 6, 6> T = Eigen::Matrix<double, 6, 6>::Identity();
+    T.block<3, 3>(3, 3) = state_point_.rot.toRotationMatrix();
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>>(msg.pose.covariance.data()) =
+        T * scan_information_ * T.transpose();
+    pub_scan_information_->publish(msg);
 }
 
 void LaserMapping::PublishFrameWorld() {
